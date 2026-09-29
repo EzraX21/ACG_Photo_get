@@ -2,21 +2,28 @@
 import logging
 import threading
 import os
+import sys
 import flet as ft
 import main
+import android_store
 
 # 容错：如果 main.CONFIG 不存在
 if not hasattr(main, 'CONFIG'):
     main.CONFIG = {
-        "SAVE_DIR": os.path.expanduser("~/ACG_Photo_get"),
+        "SAVE_DIR": "",
         "TARGET_COUNT": 30,
         "MAX_WORKERS": 5,
         "R18": False,
         "API_SOURCE": "nekos",
-        "FILTER_RESOLUTION": False,
-        "MIN_WIDTH": 1920,
-        "MIN_HEIGHT": 1080,
     }
+
+IS_ANDROID = sys.platform == "android"
+
+def default_save_dir():
+    """Android 上用公共 Pictures 目录（相册可见），桌面用 home 下的老路径。"""
+    if not IS_ANDROID:
+        return os.path.expanduser("~/ACG_Photo_get")
+    return android_store.default_public_dir()
 
 class FletLogHandler(logging.Handler):
     def __init__(self, output: ft.Text):  # ✅ 修复：__init__
@@ -35,8 +42,8 @@ class FletLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-def apply_gui_config(target_tf, workers_tf, r18_dropdown, filter_dropdown,
-                        api_dropdown, save_tf, min_w_tf, min_h_tf):
+def apply_gui_config(target_tf, workers_tf, r18_dropdown,
+                        api_dropdown, save_tf):
     def _int(val, default):
         try:
             return int(val) if val else default
@@ -47,11 +54,8 @@ def apply_gui_config(target_tf, workers_tf, r18_dropdown, filter_dropdown,
     main.CONFIG["TARGET_COUNT"] = _int(target_tf.value, 30)
     main.CONFIG["MAX_WORKERS"] = _int(workers_tf.value, 5)
     main.CONFIG["R18"] = str(r18_dropdown.value).lower() in ("true", "1", "yes")
-    main.CONFIG["FILTER_RESOLUTION"] = str(filter_dropdown.value).lower() in ("true", "1", "yes")
     main.CONFIG["API_SOURCE"] = api_dropdown.value or "nekos"
-    main.CONFIG["SAVE_DIR"] = save_tf.value
-    main.CONFIG["MIN_WIDTH"] = _int(min_w_tf.value, 1920)
-    main.CONFIG["MIN_HEIGHT"] = _int(min_h_tf.value, 1080)
+    main.CONFIG["SAVE_DIR"] = save_tf.value or default_save_dir()
 
 def main_gui(page: ft.Page):
     page.title = "ACG Photo GET"
@@ -68,13 +72,6 @@ def main_gui(page: ft.Page):
         width=120
     )
 
-    filter_dropdown = ft.Dropdown(
-        label="分辨率过滤",
-        options=[ft.dropdown.Option("True"), ft.dropdown.Option("False")],
-        value=str(main.CONFIG.get("FILTER_RESOLUTION", False)),
-        width=150
-    )
-
     api_dropdown = ft.Dropdown(
         label="API 源",
         options=[ft.dropdown.Option("nekos"), ft.dropdown.Option("lolicon")],
@@ -82,17 +79,31 @@ def main_gui(page: ft.Page):
         width=150
     )
 
-    save_tf = ft.TextField(label="保存路径", value=str(main.CONFIG.get("SAVE_DIR", "")), width=300)
+    save_tf = ft.TextField(
+        label="保存路径",
+        value=str(main.CONFIG.get("SAVE_DIR") or default_save_dir()),
+        width=300,
+    )
 
-    # ✅ 修复：文件夹选择
+    # 文件夹选择：Android 上系统选择器返回的路径可能不可写，
+    # 所以只在成功时采纳，失败则回落到应用私有目录
     def _on_save_path(e):
-        if e.path:  # ✅ 使用 e.path（不是 e.files）
-            save_tf.value = e.path
-            save_tf.update()
+        if e.path:
+            try:
+                os.makedirs(e.path, exist_ok=True)
+                save_tf.value = e.path
+            except Exception:
+                save_tf.value = default_save_dir()
+        else:
+            save_tf.value = default_save_dir()
+        save_tf.update()
 
     file_picker = ft.FilePicker()
     file_picker.on_result = _on_save_path
-    page.overlay.append(file_picker)
+    if hasattr(page, "services"):
+        page.services.append(file_picker)
+    else:
+        page.overlay.append(file_picker)
 
     # ✅ 修复：ft.Icons.FOLDER（大写 I）和 get_directory_path
     folder_btn = ft.IconButton(
@@ -101,8 +112,6 @@ def main_gui(page: ft.Page):
         on_click=lambda e: file_picker.get_directory_path()  # ✅ 选择文件夹
     )
 
-    min_w_tf = ft.TextField(label="最小宽度", value=str(main.CONFIG.get("MIN_WIDTH", 1920)), width=120)
-    min_h_tf = ft.TextField(label="最小高度", value=str(main.CONFIG.get("MIN_HEIGHT", 1080)), width=120)
 
     log_text = ft.Text(value="等待开始...", selectable=True, expand=True, size=12)
 
@@ -117,10 +126,28 @@ def main_gui(page: ft.Page):
         start_btn.disabled = True
         start_btn.update()
 
+        # Android 上要写公共目录得先拿到"所有文件访问"权限，
+        # 没权限就退到应用私有目录，保证还能用
+        if IS_ANDROID:
+            android_store.request_permission(page)
+            target = save_tf.value or default_save_dir()
+            if not android_store.public_dir_or_none(target):
+                save_tf.value = android_store.default_public_dir()
+            if not android_store.has_permission():
+                log_text.value = (
+                    "⚠️ 没有存储权限，已保存到应用私有目录（相册看不到）\n"
+                    "   如需在相册查看，请授权后重试\n"
+                )
+                save_tf.value = os.environ.get("FLET_APP_STORAGE_DATA", "")
+                save_tf.update()
+
         apply_gui_config(
-            target_tf, workers_tf, r18_dropdown, filter_dropdown,
-            api_dropdown, save_tf, min_w_tf, min_h_tf,
+            target_tf, workers_tf, r18_dropdown, api_dropdown, save_tf,
         )
+
+        # main.py 在导入时就把 SAVE_DIR 解析并建好目录了，用户在界面上
+        # 改过路径的话，这里要重新解析一次并重建日志文件
+        main.reinit_save_dir()
 
         log_text.value = "🚀 任务开始...\n"
         log_text.update()
@@ -148,14 +175,39 @@ def main_gui(page: ft.Page):
         on_click=_start
     )
 
+    # Android 上需要存储权限才能写进相册，提前说清楚，
+    # 免得用户点开始才发现弹了个框
+    if IS_ANDROID:
+        perm_hint = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=ft.Colors.BLUE_700),
+                    ft.Text(
+                        "首次开始下载会请求存储权限，授权后图片保存到 "
+                        "Pictures/ACG_Photo_get，相册里可以直接看到",
+                        size=12,
+                        color=ft.Colors.BLUE_900,
+                        expand=True,
+                    ),
+                ],
+                spacing=8,
+            ),
+            padding=10,
+            bgcolor=ft.Colors.BLUE_50,
+            border_radius=5,
+            border=ft.border.all(1, ft.Colors.BLUE_200),
+        )
+    else:
+        perm_hint = ft.Container(height=0)
+
     # ✅ 修复：使用 GREY_200 替代不存在的 SURFACE_VARIANT
     page.add(
         ft.Text("🎨 ACG Photo Downloader", size=24, weight=ft.FontWeight.BOLD),
         ft.Divider(),
-        ft.Row([target_tf, workers_tf, r18_dropdown, filter_dropdown], spacing=10),
+        ft.Row([target_tf, workers_tf, r18_dropdown], spacing=10),
         ft.Row([api_dropdown]),
         ft.Row([save_tf, folder_btn], spacing=10),
-        ft.Row([min_w_tf, min_h_tf], spacing=10),
+        perm_hint,
         ft.Divider(),
         ft.Text("📋 日志输出", weight=ft.FontWeight.BOLD),
         ft.Container(

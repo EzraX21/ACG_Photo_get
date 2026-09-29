@@ -1,0 +1,49 @@
+name: Build APK for Android
+
+permissions:
+  contents: write
+
+# 手动触发，或者推 v 开头的标签时打包
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  android-build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Flet app (APK)
+        id: build
+        uses: flet-dev/flet-build-action@v1
+        with:
+          target: apk
+          runner-python-version: "3.12"
+          build-version: "1.0.0"
+          build-number: ${{ github.run_number }}
+          # 只出 arm64，体积小一大半，主流手机都是这个架构
+          # pillow 没有 Android wheel，排除掉；main.py 里它的 import
+          # 已包在 try-except 中，Android 上分辨率过滤会自动降级为不生效
+          extra-args: "--split-per-abi --arch arm64 --exclude pillow"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-arm64
+          # action 默认已打包成 zip，这里关掉二次打包
+          archive: false
+          path: ${{ steps.build.outputs.archive-path }}
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.build.outputs.archive-path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

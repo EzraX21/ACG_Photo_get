@@ -6,10 +6,24 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "flet[all]==0.25.2",
-    "pillow>=12.2.0",
+    "flet-permission-handler",
     "pyinstaller>=6.21.0",
     "requests>=2.34.2",
+    "pyjnius; sys_platform == 'android'",
 ]
+
+[tool.flet.android]
+# Android 上调 MediaScannerConnection 刷新相册需要
+dependencies = [
+    "pyjnius",
+]
+
+[tool.flet.android.permission]
+# 写公共目录、让相册可见所需的"所有文件访问"权限
+"android.permission.MANAGE_EXTERNAL_STORAGE" = true
+# 旧版本 Android 的读写权限，13 以上用不到，限制到 32 封顶
+"android.permission.READ_EXTERNAL_STORAGE" = true
+"android.permission.WRITE_EXTERNAL_STORAGE" = true
 
 [dependency-groups]
 dev = [

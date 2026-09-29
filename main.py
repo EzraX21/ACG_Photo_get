@@ -1,5 +1,5 @@
 """
-依赖： requests pillow
+依赖： requests
 """
 
 download_path = "~/ACG_Photo_get"
@@ -14,6 +14,7 @@ from threading import Lock
 import argparse
 import json
 import sys
+import android_store
 
 # --- 配置参数---
 CONFIG = {
@@ -27,9 +28,6 @@ CONFIG = {
     "API_ENDPOINT": {"nekos": "https://api.nekosapi.com/v4/images", "lolicon": "https://api.lolicon.app/setu/v2"},
     "REQUEST_DELAY": 0.5,                                     # 每批请求间隔（秒）
     "MAX_LOOP": 50,                                           # 最大尝试轮次
-    "FILTER_RESOLUTION": False,                               # 是否开启分辨率过滤
-    "MIN_WIDTH": 1920,
-    "MIN_HEIGHT": 1080,
 }
 
 # --------------------------------
@@ -42,15 +40,45 @@ def resolve_path(path: str) -> str:
 
 # Apply early resolution and ensure the directory exists.
 # If creation fails (e.g., due to permission issues), fall back to a user‑writable folder.
-resolved_dir = resolve_path(CONFIG["SAVE_DIR"])
-try:
-    os.makedirs(resolved_dir, exist_ok=True)
-except Exception as e:
+def reinit_save_dir():
+    """解析并创建 SAVE_DIR，同时把日志文件挪到新目录。
+
+    GUI 在启动前可能改过 CONFIG["SAVE_DIR"]，所以要能重复调用。
+    解析或建目录失败时回落到用户主目录，保证一定有地方写日志。
+    """
     fallback_dir = os.path.join(os.path.expanduser("~"), "ACG_Photo_get")
-    os.makedirs(fallback_dir, exist_ok=True)
-    resolved_dir = fallback_dir
-    logging.warning(f"Failed to create configured SAVE_DIR ({CONFIG['SAVE_DIR']}), falling back to {fallback_dir}: {e}")
-CONFIG["SAVE_DIR"] = resolved_dir
+    try:
+        resolved_dir = resolve_path(CONFIG["SAVE_DIR"])
+        os.makedirs(resolved_dir, exist_ok=True)
+        # 目录建得出来不代表能写，试探一下
+        probe = os.path.join(resolved_dir, ".write_test")
+        with open(probe, "w") as f:
+            f.write("")
+        os.remove(probe)
+    except Exception as e:
+        logging.warning(
+            f"Failed to use SAVE_DIR ({CONFIG['SAVE_DIR']}), "
+            f"falling back to {fallback_dir}: {e}"
+        )
+        try:
+            os.makedirs(fallback_dir, exist_ok=True)
+        except Exception:
+            pass
+        resolved_dir = fallback_dir
+
+    CONFIG["SAVE_DIR"] = resolved_dir
+
+    # 日志文件跟着换目录，否则新目录里没有 photo_get.log
+    new_handler = logging.FileHandler(os.path.join(resolved_dir, "photo_get.log"))
+    new_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    for h in list(logging.getLogger().handlers):
+        if isinstance(h, logging.FileHandler):
+            logging.getLogger().removeHandler(h)
+            h.close()
+    logging.getLogger().addHandler(new_handler)
+    return resolved_dir
+
+reinit_save_dir()
 
 # ---------- Logging Setup ----------
 
@@ -207,14 +235,13 @@ def fetch_one_batch():
         return fetch_from_loliconapi()
     return fetch_from_nekosapi()
 
-# ===================== 单个图片下载（无分辨率检查） =====================
+# ===================== 单个图片下载 =====================
 
 def download_single_image(image_info):
     """下载单张图片并返回状态字符串。
     返回值:
         "success"   - 下载并保存成功
         "duplicate" - 文件已存在或 PID 已记录
-        "filtered"  - 因分辨率过滤被跳过（如果开启）
         "error"     - 其它异常或 HTTP 错误
     """
     pid = image_info.get("pid", "unknown")
@@ -249,26 +276,11 @@ def download_single_image(image_info):
 
 
         # ---- 下载内容 ----
-        # 使用 BytesIO 以便后续可能的分辨率检查
         img_bytes = BytesIO()
         for chunk in resp.iter_content(chunk_size=8192):
             if chunk:
                 img_bytes.write(chunk)
         img_bytes.seek(0)
-
-        # ---- 可选分辨率过滤 ----
-        if CONFIG.get("FILTER_RESOLUTION"):
-            try:
-                from PIL import Image
-                with Image.open(img_bytes) as im:
-                    if im.width < CONFIG.get("MIN_WIDTH", 1920) or im.height < CONFIG.get("MIN_HEIGHT", 1080):
-                        safe_print(f"  ⚠️ 分辨率不足 {im.width}x{im.height}，跳过 {filename}")
-                        return "filtered"
-                # 重置指针以便后续写入
-                img_bytes.seek(0)
-            except Exception as e:
-                safe_print(f"  ⚠️ 分辨率检查失败 {pid}: {e}")
-                # 继续保存，视为非过滤错误
 
         # ---- 冲突命名（添加序号） ----
         final_path = base_path
@@ -281,6 +293,8 @@ def download_single_image(image_info):
         # 写入文件
         with open(final_path, "wb") as f:
             f.write(img_bytes.getbuffer())
+        # Android 上通知媒体库，这样相册能立刻看到新图
+        android_store.notify_media_scan([final_path])
         safe_print(f"  ✅ 下载成功：{os.path.basename(final_path)}")
         # 记录 PID
         register_pid(str(pid))
@@ -390,7 +404,7 @@ def main():
     # Load already processed PID set from persistent log
     seen_pids = load_seen_pids()
     # 统计信息
-    stats = {"success": 0, "duplicate": 0, "filtered": 0, "error": 0}
+    stats = {"success": 0, "duplicate": 0, "error": 0}
 
     while success_count < target and loop_count < max_loop:
         loop_count += 1
@@ -427,8 +441,6 @@ def main():
                         safe_print(f"📈 当前成功总数：{success_count}/{target}")
                     elif status == "duplicate":
                         stats["duplicate"] += 1
-                    elif status == "filtered":
-                        stats["filtered"] += 1
                     else:
                         stats["error"] += 1
                 except Exception as e:
