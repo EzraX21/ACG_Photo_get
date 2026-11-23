@@ -738,7 +738,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "flet", extra = ["all"] },
     { name = "flet-permission-handler" },
-    { name = "pyinstaller" },
     { name = "pyjnius", version = "1.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform == 'android'" },
     { name = "pyjnius", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform == 'android'" },
     { name = "requests" },
@@ -753,7 +752,6 @@ dev = [
 requires-dist = [
     { name = "flet", extras = ["all"], specifier = "==1.1.2" },
     { name = "flet-permission-handler", specifier = "==1.1.2" },
-    { name = "pyinstaller", specifier = ">=6.21.0" },
     { name = "pyjnius", marker = "sys_platform == 'android'" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
