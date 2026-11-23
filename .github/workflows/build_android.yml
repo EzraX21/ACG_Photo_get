@@ -27,16 +27,17 @@ jobs:
           runner-python-version: "3.12"
           build-version: "1.0.0"
           build-number: ${{ github.run_number }}
-          # 只出 arm64，体积小一大半，主流手机都是这个架构
+          # 只出 arm64，体积小一大半，主流手机都是这个架构。
+          # flet 1.x 的 --arch 取值是 arm64-v8a（0.25 用的 arm64 已不认）。
           # pillow 没有 Android wheel，排除掉；main.py 里它的 import
-          # 已包在 try-except 中，Android 上分辨率过滤会自动降级为不生效
-          extra-args: "--split-per-abi --arch arm64 --exclude pillow"
+          # 已包在 try-except 中，Android 上分辨率过滤会自动降级为不生效。
+          extra-args: "--split-per-abi --arch arm64-v8a --exclude pillow"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk-arm64
-          # action 默认已打包成 zip，这里关掉二次打包
+          # flet-build-action 已产出 flet-apk.zip，这里关掉二次打包
           archive: false
           path: ${{ steps.build.outputs.archive-path }}
 
