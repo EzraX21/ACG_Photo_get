@@ -38,6 +38,19 @@ def resolve_path(path: str) -> str:
     """Resolve user (~) and ${ENV} in a path string."""
     return os.path.expandvars(os.path.expanduser(path))
 
+def _file_handler(path: str) -> logging.FileHandler | None:
+    """Best-effort log file handler.
+
+    The app can run where the target directory is not writable (read-only
+    home, sandboxed test runner), and logging must not break the import.
+    """
+    try:
+        handler = logging.FileHandler(path)
+    except OSError:
+        return None
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    return handler
+
 # Apply early resolution and ensure the directory exists.
 # If creation fails (e.g., due to permission issues), fall back to a user‑writable folder.
 def reinit_save_dir():
@@ -69,13 +82,13 @@ def reinit_save_dir():
     CONFIG["SAVE_DIR"] = resolved_dir
 
     # 日志文件跟着换目录，否则新目录里没有 photo_get.log
-    new_handler = logging.FileHandler(os.path.join(resolved_dir, "photo_get.log"))
-    new_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    new_handler = _file_handler(os.path.join(resolved_dir, "photo_get.log"))
     for h in list(logging.getLogger().handlers):
         if isinstance(h, logging.FileHandler):
             logging.getLogger().removeHandler(h)
             h.close()
-    logging.getLogger().addHandler(new_handler)
+    if new_handler is not None:
+        logging.getLogger().addHandler(new_handler)
     return resolved_dir
 
 reinit_save_dir()
@@ -84,13 +97,14 @@ reinit_save_dir()
 
 
 # Ensure log directory exists before configuring handlers (already ensured above)
+_log_handlers = [logging.StreamHandler()]
+_log_file_handler = _file_handler(os.path.join(CONFIG["SAVE_DIR"], "photo_get.log"))
+if _log_file_handler is not None:
+    _log_handlers.insert(0, _log_file_handler)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join(CONFIG["SAVE_DIR"], "photo_get.log")),
-        logging.StreamHandler()
-    ]
+    handlers=_log_handlers,
 )
 
 

@@ -51,9 +51,11 @@ def ensure_dir(path):
         return None
 
 
-def request_permission(page):
+async def request_permission(page=None):
     """弹出权限对话框要"所有文件访问"权限。
 
+    flet 1.x 里权限处理器是服务，构造时自动注册到当前页面；
+    request() 是异步方法，返回 PermissionStatus。
     返回 True 表示已经有权限（或不需要权限）。
     """
     if not IS_ANDROID:
@@ -65,21 +67,21 @@ def request_permission(page):
         return False
     try:
         svc = fph.PermissionHandler()
-        if hasattr(page, "services"):
-            page.services.append(svc)
-        return svc.request_permission(fph.Permission.MANAGE_EXTERNAL_STORAGE)
+        status = await svc.request(fph.Permission.MANAGE_EXTERNAL_STORAGE)
+        return status == fph.PermissionStatus.GRANTED
     except Exception:
         return False
 
 
-def has_permission():
+async def has_permission():
     """检查是否已获得所有文件访问权限。"""
     if not IS_ANDROID:
         return True
     try:
         import flet_permission_handler as fph
         svc = fph.PermissionHandler()
-        return bool(svc.check_permission(fph.Permission.MANAGE_EXTERNAL_STORAGE))
+        status = await svc.get_status(fph.Permission.MANAGE_EXTERNAL_STORAGE)
+        return status == fph.PermissionStatus.GRANTED
     except Exception:
         return False
 

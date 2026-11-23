@@ -1,7 +1,8 @@
-"""Flet GUI for ACG_Photo_get (正式发布版 v1.0.0)."""
+"""Flet GUI for ACG_Photo_get (flet 1.x)."""
+import asyncio
 import logging
-import threading
 import os
+import queue
 import sys
 import flet as ft
 import main
@@ -26,19 +27,19 @@ def default_save_dir():
     return android_store.default_public_dir()
 
 class FletLogHandler(logging.Handler):
-    def __init__(self, output: ft.Text):  # ✅ 修复：__init__
-        super().__init__()                # ✅ 修复：__init__
+    """把日志行放进队列，由 UI 线程上的任务统一刷新。
+
+    flet 1.x 的事件循环只有一个线程，工作线程不能直接改控件，
+    所以日志先入队，再由 _pump_logs 在事件循环里更新 Text。
+    """
+    def __init__(self, output: "queue.Queue[str]"):
+        super().__init__()
         self.output = output
         self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 
     def emit(self, record: logging.LogRecord):
         try:
-            msg = self.format(record)
-            if self.output.value:
-                self.output.value += "\n" + msg
-            else:
-                self.output.value = msg
-            self.output.update()
+            self.output.put_nowait(self.format(record))
         except Exception:
             self.handleError(record)
 
@@ -50,7 +51,6 @@ def apply_gui_config(target_tf, workers_tf, r18_dropdown,
         except Exception:
             return default
 
-    # ✅ 修复：移除键名末尾的空格
     main.CONFIG["TARGET_COUNT"] = _int(target_tf.value, 30)
     main.CONFIG["MAX_WORKERS"] = _int(workers_tf.value, 5)
     main.CONFIG["R18"] = str(r18_dropdown.value).lower() in ("true", "1", "yes")
@@ -59,22 +59,22 @@ def apply_gui_config(target_tf, workers_tf, r18_dropdown,
 
 def main_gui(page: ft.Page):
     page.title = "ACG Photo GET"
-    page.window_width = 720
-    page.window_height = 560
+    page.window.width = 720
+    page.window.height = 560
 
     target_tf = ft.TextField(label="目标数量", value=str(main.CONFIG.get("TARGET_COUNT", 30)), width=120)
     workers_tf = ft.TextField(label="并发线程", value=str(main.CONFIG.get("MAX_WORKERS", 5)), width=120)
 
     r18_dropdown = ft.Dropdown(
         label="R18",
-        options=[ft.dropdown.Option("True"), ft.dropdown.Option("False")],
+        options=[ft.DropdownOption("True"), ft.DropdownOption("False")],
         value=str(main.CONFIG.get("R18", False)),
         width=120
     )
 
     api_dropdown = ft.Dropdown(
         label="API 源",
-        options=[ft.dropdown.Option("nekos"), ft.dropdown.Option("lolicon")],
+        options=[ft.DropdownOption("nekos"), ft.DropdownOption("lolicon")],
         value=main.CONFIG.get("API_SOURCE", "nekos"),
         width=150
     )
@@ -85,55 +85,84 @@ def main_gui(page: ft.Page):
         width=300,
     )
 
+    # flet 1.x：服务自注册，不需要 page.overlay / page.services；
+    # get_directory_path() 是 async 的，直接返回路径，不再走 on_result。
+    file_picker = ft.FilePicker()
+
     # 文件夹选择：Android 上系统选择器返回的路径可能不可写，
     # 所以只在成功时采纳，失败则回落到应用私有目录
-    def _on_save_path(e):
-        if e.path:
+    async def _on_save_path(e=None):
+        path = None
+        try:
+            path = await file_picker.get_directory_path()
+        except Exception:
+            # web 模式不支持选择目录，直接回落
+            path = None
+        if path:
             try:
-                os.makedirs(e.path, exist_ok=True)
-                save_tf.value = e.path
+                os.makedirs(path, exist_ok=True)
+                save_tf.value = path
             except Exception:
                 save_tf.value = default_save_dir()
         else:
             save_tf.value = default_save_dir()
-        save_tf.update()
 
-    file_picker = ft.FilePicker()
-    file_picker.on_result = _on_save_path
-    if hasattr(page, "services"):
-        page.services.append(file_picker)
-    else:
-        page.overlay.append(file_picker)
-
-    # ✅ 修复：ft.Icons.FOLDER（大写 I）和 get_directory_path
     folder_btn = ft.IconButton(
         icon=ft.Icons.FOLDER,
         tooltip="选择保存文件夹",
-        on_click=lambda e: file_picker.get_directory_path()  # ✅ 选择文件夹
+        on_click=_on_save_path
     )
 
 
     log_text = ft.Text(value="等待开始...", selectable=True, expand=True, size=12)
+    log_queue: "queue.Queue[str]" = queue.Queue()
 
     logger = logging.getLogger()
     for h in list(logger.handlers):
         if isinstance(h, (logging.StreamHandler, logging.FileHandler)):
             logger.removeHandler(h)
-    logger.addHandler(FletLogHandler(log_text))
+    logger.addHandler(FletLogHandler(log_queue))
     logger.setLevel(logging.INFO)
 
-    def _start(e):
+    async def _pump_logs():
+        """把工作线程写进队列的日志搬到 UI 上。"""
+        while True:
+            await asyncio.sleep(0.2)
+            lines = []
+            while True:
+                try:
+                    lines.append(log_queue.get_nowait())
+                except queue.Empty:
+                    break
+            if not lines:
+                continue
+            current = log_text.value or ""
+            if current and current != "等待开始...":
+                current = current + "\n" + "\n".join(lines)
+            else:
+                current = "\n".join(lines)
+            parts = current.splitlines()
+            if len(parts) > 800:
+                current = "\n".join(parts[-800:])
+            try:
+                log_text.value = current
+                log_text.update()
+            except Exception:
+                # 页面已关闭时 task 会被取消，这里兜底避免刷屏
+                return
+
+    async def _start(e):
         start_btn.disabled = True
         start_btn.update()
 
         # Android 上要写公共目录得先拿到"所有文件访问"权限，
         # 没权限就退到应用私有目录，保证还能用
         if IS_ANDROID:
-            android_store.request_permission(page)
+            await android_store.request_permission(page)
             target = save_tf.value or default_save_dir()
             if not android_store.public_dir_or_none(target):
                 save_tf.value = android_store.default_public_dir()
-            if not android_store.has_permission():
+            if not await android_store.has_permission():
                 log_text.value = (
                     "⚠️ 没有存储权限，已保存到应用私有目录（相册看不到）\n"
                     "   如需在相册查看，请授权后重试\n"
@@ -152,25 +181,23 @@ def main_gui(page: ft.Page):
         log_text.value = "🚀 任务开始...\n"
         log_text.update()
 
-        def worker():
-            try:
-                exit_code = main.main()
-            except Exception as ex:
-                logger.exception(f"下载任务异常：{ex}")
-                exit_code = 1
-
-            if exit_code == 0:
-                logger.info(f"✅ 完成: 下载成功 {main.CONFIG.get('TARGET_COUNT', 0)} 张")
-            else:
-                logger.warning(f"⚠️ 未完成")
-
+        try:
+            # 下载是阻塞 IO，放到线程里跑，事件循环继续处理 UI
+            exit_code = await asyncio.to_thread(main.main)
+        except (Exception, SystemExit) as ex:
+            logger.exception(f"下载任务异常：{ex}")
+            exit_code = 1
+        finally:
             start_btn.disabled = False
             start_btn.update()
 
-        threading.Thread(target=worker, daemon=True).start()
+        if exit_code == 0:
+            logger.info(f"✅ 完成: 下载成功 {main.CONFIG.get('TARGET_COUNT', 0)} 张")
+        else:
+            logger.warning("⚠️ 未完成")
 
     start_btn = ft.FilledButton(
-        text="开始下载",
+        content="开始下载",
         icon=ft.Icons.DOWNLOAD,
         on_click=_start
     )
@@ -195,12 +222,11 @@ def main_gui(page: ft.Page):
             padding=10,
             bgcolor=ft.Colors.BLUE_50,
             border_radius=5,
-            border=ft.border.all(1, ft.Colors.BLUE_200),
+            border=ft.Border.all(1, ft.Colors.BLUE_200),
         )
     else:
         perm_hint = ft.Container(height=0)
 
-    # ✅ 修复：使用 GREY_200 替代不存在的 SURFACE_VARIANT
     page.add(
         ft.Text("🎨 ACG Photo Downloader", size=24, weight=ft.FontWeight.BOLD),
         ft.Divider(),
@@ -214,13 +240,15 @@ def main_gui(page: ft.Page):
             content=log_text,
             expand=True,
             padding=10,
-            bgcolor=ft.Colors.GREY_200,  # ✅ 修复
+            bgcolor=ft.Colors.GREY_200,
             border_radius=5,
-            border=ft.border.all(1, ft.Colors.GREY_400)  # ✅ 修复
+            border=ft.Border.all(1, ft.Colors.GREY_400)
         ),
         ft.Row([start_btn], alignment=ft.MainAxisAlignment.CENTER),
     )
 
-# ✅ 修复：__name__ == "__main__"
-if __name__ == "__main__":
-    ft.app(target=main_gui)  # ✅ 使用 ft.app
+    page.run_task(_pump_logs)
+
+
+# flet 1.x：入口模块在模块顶层调用 ft.run()，flet build / flet run 都会从这里启动
+ft.run(main_gui)
