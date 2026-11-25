@@ -7,3 +7,4 @@ build/
 *.log
 photo_get.log
 /.verify/
+flet-clients/

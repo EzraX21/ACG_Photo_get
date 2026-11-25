@@ -38,7 +38,8 @@ jobs:
       # 所以把所有可用的发行版构建都打进去，运行时自己挑匹配的那个。
       - name: Download Flet Linux clients
         id: flet_client
-        run: python3 scripts/stage_flet_clients.py --out flet-clients --github-output "$GITHUB_OUTPUT"
+        # 必须走 uv run：系统 python3 没装项目依赖，import flet_desktop 会失败。
+        run: uv run python scripts/stage_flet_clients.py --out flet-clients --github-output "$GITHUB_OUTPUT"
 
       - name: Build
         run: |
