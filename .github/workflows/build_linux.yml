@@ -34,14 +34,16 @@ jobs:
       - name: Download Flet Linux client
         id: flet_client
         run: |
-          ver="1.1.2"
-          arch="amd64"
-          distro="ubuntu22.04"
-          flavor="light"
+          # 版本和归档名都从装好的包里读，不写死。写死的话 flet 升级后
+          # 这里会静默下载旧版客户端，和包里的 flet 对不上。
+          ver="$(uv run python -c 'import flet_desktop; print(flet_desktop.version.version)')"
+          arch="$(uv run python -c 'from flet_desktop import get_arch; print(get_arch())')"
+          distro="$(uv run python -c 'from flet_desktop import __get_linux_distro_id, get_arch; print(__get_linux_distro_id(get_arch()))')"
+          flavor="$(uv run python -c 'from flet_desktop import __get_desktop_flavor; print(__get_desktop_flavor())')"
           url="https://github.com/flet-dev/flet/releases/download/v${ver}/flet-linux-${distro}-${flavor}-${arch}.tar.gz"
           out="flet-linux-${distro}-${flavor}-${arch}.tar.gz"
           echo "Downloading $url ..."
-          curl -L -o "$out" "$url"
+          curl -sL -o "$out" "$url"
           echo "Downloaded $out ($(stat -c%s "$out") bytes)"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 

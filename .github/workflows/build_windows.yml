@@ -34,12 +34,15 @@ jobs:
       - name: Download Flet Windows client
         id: flet_client
         run: |
-          $ver = "1.1.2"
+          # 版本从装好的包里读，不写死。写死的话 flet 升级后这里会
+          # 静默下载旧版客户端，和包里的 flet 对不上。
+          $ver = (uv run python -c "import flet_desktop; print(flet_desktop.version.version)").Trim()
           $url = "https://github.com/flet-dev/flet/releases/download/v$ver/flet-windows.zip"
           $out = "flet-windows.zip"
           Write-Host "Downloading $url ..."
           Invoke-WebRequest -Uri $url -OutFile $out
-          Write-Host "Downloaded $out ($(Get-Item $out).Length bytes)"
+          $size = (Get-Item $out).Length
+          Write-Host "Downloaded $out ($size bytes)"
           echo "path=$out" >> $env:GITHUB_OUTPUT
 
       - name: Build exe
