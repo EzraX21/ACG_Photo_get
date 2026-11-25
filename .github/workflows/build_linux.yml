@@ -3,6 +3,9 @@ on:
   push:
     tags:
       - "v*"
+  # 允许在打 tag 之前先手动跑一次打包，确认依赖和 hook 没问题。
+  # 非 tag 触发时不会创建 release（见下方 Create Release 的 if）。
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -30,6 +33,7 @@ jobs:
           uv run pyinstaller --onefile -w --name=ACG_Photo_Get-linux-x86_64 gui.py
 
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
