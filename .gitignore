@@ -6,3 +6,4 @@ build/
 *.spec
 *.log
 photo_get.log
+/.verify/
