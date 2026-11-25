@@ -252,6 +252,19 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-desktop"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/fd/a237c7dfa8674ea1b1e121449db3dd27c5eb1e5388f96ed56248f85842f4/flet_desktop-1.1.2.tar.gz", hash = "sha256:eca291ccfaa407b9895502fb0133fcf5ae346459dab21dd25569df49c0a85235", size = 19345, upload-time = "2026-11-06T23:28:50.919Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/ca/a25eb55c3b5cd0973486828fb75edf1952e665c93dcaa958187c01484bc2/flet_desktop-1.1.2-py3-none-any.whl", hash = "sha256:e192133923f462a87ad7b92bc1f1b94947c341083c31340f12964da653301f28", size = 18544, upload-time = "2026-11-06T23:28:49.884Z" },
+]
+
+[[package]]
 name = "flet-permission-handler"
 version = "1.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -593,6 +606,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "flet-cli" },
+    { name = "flet-desktop" },
     { name = "pyinstaller" },
 ]
 
@@ -607,6 +621,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "flet-cli", specifier = "==1.1.2" },
+    { name = "flet-desktop", specifier = "==1.1.2" },
     { name = "pyinstaller", specifier = ">=6.21.0" },
 ]
 
