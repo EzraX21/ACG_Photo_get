@@ -43,9 +43,11 @@ jobs:
           echo "path=$out" >> $env:GITHUB_OUTPUT
 
       - name: Build exe
+        # Windows runner 默认 shell 是 pwsh，不认 cmd 的 `^` 续行符，
+        # 用 PowerShell 的反引号。
         run: |
-          uv run pyinstaller --onefile -w --name=ACG_Photo_Get-windows-x86_64 ^
-            --add-data "${{ steps.flet_client.outputs.path }};flet_desktop/app" ^
+          uv run pyinstaller --onefile -w --name=ACG_Photo_Get-windows-x86_64 `
+            --add-data "${{ steps.flet_client.outputs.path }};flet_desktop/app" `
             gui.py
 
       - name: Create Release
