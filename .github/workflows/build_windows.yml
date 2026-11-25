@@ -3,11 +3,13 @@ name: Build exe for ACG_Photo_get
 permissions:
   contents: write
 
-# 触发条件：当推送到 main 分支，或推送以 'v' 开头的标签时触发
+# 触发条件：推送以 'v' 开头的标签时打包；也可手动触发用于验证。
 on:
   push:
     tags:
       - "v*"
+  # 非 tag 触发时不创建 release（见下方 Create Release 的 if）。
+  workflow_dispatch:
 
 jobs:
   pyinstaller-build:
@@ -31,6 +33,7 @@ jobs:
           uv run pyinstaller --onefile -w --name=ACG_Photo_Get-windows-x86_64 gui.py
 
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/ACG_Photo_Get-windows-x86_64.exe

@@ -19,13 +19,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # APK 的 versionName 跟着 tag 走。以前这里是硬编码的 1.0.0，
+      # 打 v1.1.0 的 tag 出来的包仍然自称 1.0.0。
+      # workflow_dispatch 没有 tag，给个 0.0.0 占位，不冒充正式版本。
+      - name: Resolve APK version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Flet app (APK)
         id: build
         uses: flet-dev/flet-build-action@v1
         with:
           target: apk
           runner-python-version: "3.12"
-          build-version: "1.0.0"
+          build-version: ${{ steps.ver.outputs.value }}
           build-number: ${{ github.run_number }}
           # 只出 arm64，体积小一大半，主流手机都是这个架构。
           # flet 1.x 的 --arch 取值是 arm64-v8a（0.25 用的 arm64 已不认）。

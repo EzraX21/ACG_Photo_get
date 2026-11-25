@@ -1,6 +1,6 @@
 [project]
 name = "photo-get"
-version = "0.1.0"
+version = "1.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,4 +33,13 @@ dependencies = [
 dev = [
     "pyinstaller>=6.21.0",
     "flet-cli==1.1.2",
+    # flet_cli 的 PyInstaller hook 在顶层 `import flet_desktop`，
+    # 而基础 flet 不带这个包。缺了它 Linux/Windows 打包会在
+    # ImportErrorWhenRunningHook 处直接失败。
+    # 只能放 dev：flet-desktop 没有 Android wheel，进运行时依赖会
+    # 让 serious_python 的 --only-binary :all: 打包步骤失败。
+    "flet-desktop==1.1.2",
+    # tests/ 用的是 pytest 风格（def test_*(monkeypatch)），
+    # `python3 -m unittest discover` 会收集到 0 个用例却照样报 OK。
+    "pytest>=8.0",
 ]
