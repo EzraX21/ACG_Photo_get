@@ -28,9 +28,28 @@ jobs:
       - name: Install dependencies
         run: uv sync  
 
+      # 下载 flet-linux 归档并打包进 exe，否则运行时会尝试从 GitHub
+      # 下载（碰到没有受信 CA 的机器就会 TLS 校验失败）。
+      # hook-flet.py 只收集解压后的目录，运行时找的是归档。
+      - name: Download Flet Linux client
+        id: flet_client
+        run: |
+          ver="1.1.2"
+          arch="amd64"
+          distro="ubuntu22.04"
+          flavor="light"
+          url="https://github.com/flet-dev/flet/releases/download/v${ver}/flet-linux-${distro}-${flavor}-${arch}.tar.gz"
+          out="flet-linux-${distro}-${flavor}-${arch}.tar.gz"
+          echo "Downloading $url ..."
+          curl -L -o "$out" "$url"
+          echo "Downloaded $out ($(stat -c%s "$out") bytes)"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
       - name: Build
         run: |
-          uv run pyinstaller --onefile -w --name=ACG_Photo_Get-linux-x86_64 gui.py
+          uv run pyinstaller --onefile -w --name=ACG_Photo_Get-linux-x86_64 \
+            --add-data "${{ steps.flet_client.outputs.path }}:flet_desktop/app" \
+            gui.py
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
