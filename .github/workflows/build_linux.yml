@@ -31,26 +31,20 @@ jobs:
       # 下载 flet-linux 归档并打包进 exe，否则运行时会尝试从 GitHub
       # 下载（碰到没有受信 CA 的机器就会 TLS 校验失败）。
       # hook-flet.py 只收集解压后的目录，运行时找的是归档。
-      - name: Download Flet Linux client
+      #
+      # 关键：Linux 归档名带发行版（flet-linux-<distro>-light-<arch>.tar.gz），
+      # 而运行时 get_artifact_filename() 按**本机 glibc** 算这个名字。
+      # 只打构建机那一个的话，用户机器 glibc 不同就找不到归档，退回联网下载。
+      # 所以把所有可用的发行版构建都打进去，运行时自己挑匹配的那个。
+      - name: Download Flet Linux clients
         id: flet_client
-        run: |
-          # 版本和归档名都从装好的包里读，不写死。写死的话 flet 升级后
-          # 这里会静默下载旧版客户端，和包里的 flet 对不上。
-          ver="$(uv run python -c 'import flet_desktop; print(flet_desktop.version.version)')"
-          arch="$(uv run python -c 'from flet_desktop import get_arch; print(get_arch())')"
-          distro="$(uv run python -c 'from flet_desktop import __get_linux_distro_id, get_arch; print(__get_linux_distro_id(get_arch()))')"
-          flavor="$(uv run python -c 'from flet_desktop import __get_desktop_flavor; print(__get_desktop_flavor())')"
-          url="https://github.com/flet-dev/flet/releases/download/v${ver}/flet-linux-${distro}-${flavor}-${arch}.tar.gz"
-          out="flet-linux-${distro}-${flavor}-${arch}.tar.gz"
-          echo "Downloading $url ..."
-          curl -sL -o "$out" "$url"
-          echo "Downloaded $out ($(stat -c%s "$out") bytes)"
-          echo "path=$out" >> "$GITHUB_OUTPUT"
+        # 必须走 uv run：系统 python3 没装项目依赖，import flet_desktop 会失败。
+        run: uv run python scripts/stage_flet_clients.py --out flet-clients --github-output "$GITHUB_OUTPUT"
 
       - name: Build
         run: |
           uv run pyinstaller --onefile -w --name=ACG_Photo_Get-linux-x86_64 \
-            --add-data "${{ steps.flet_client.outputs.path }}:flet_desktop/app" \
+            ${{ steps.flet_client.outputs.args }} \
             gui.py
 
       - name: Create Release
